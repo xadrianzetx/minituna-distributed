@@ -153,9 +153,7 @@ class Storage:
         trial.distributions[name] = distribution
         trial.internal_params[name] = value
 
-    def set_trial_intermediate_value(
-        self, trial_id: int, step: int, value: float
-    ) -> None:
+    def set_trial_intermediate_value(self, trial_id: int, step: int, value: float) -> None:
         trial = self.trials[trial_id]
         assert not trial.is_finished, "cannot update finished trials"
         trial.intermediate_values[step] = value
@@ -171,13 +169,9 @@ class Trial:
         storage = self.study.storage
 
         trial = storage.get_trial(self.trial_id)
-        param_value = self.study.sampler.sample_independent(
-            self.study, trial, name, distribution
-        )
+        param_value = self.study.sampler.sample_independent(self.study, trial, name, distribution)
         param_value_in_internal_repr = distribution.to_internal_repr(param_value)
-        storage.set_trial_param(
-            self.trial_id, name, distribution, param_value_in_internal_repr
-        )
+        storage.set_trial_param(self.trial_id, name, distribution, param_value_in_internal_repr)
         return param_value
 
     def suggest_uniform(self, name: str, low: float, high: float) -> float:
@@ -209,9 +203,7 @@ class Command(abc.ABC):
 
 
 class Suggest(Command):
-    def __init__(
-        self, trial_id: int, name: str, distribution: BaseDistribution
-    ) -> None:
+    def __init__(self, trial_id: int, name: str, distribution: BaseDistribution) -> None:
         self.trial_id = trial_id
         self.name = name
         self.distribution = distribution
