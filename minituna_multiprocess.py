@@ -161,88 +161,6 @@ class Storage:
         trial.intermediate_values[step] = value
 
 
-class Command(abc.ABC):
-    @abc.abstractmethod
-    def execute(self, study: "Study", conn: Connection):
-        ...
-
-
-class Suggest(Command):
-    def __init__(
-        self, trial_id: int, name: str, distribution: BaseDistribution
-    ) -> None:
-        self.trial_id = trial_id
-        self.name = name
-        self.distribution = distribution
-
-    def execute(self, study: "Study", conn: Connection) -> None:
-        trial = study.storage.get_trial(self.trial_id)
-        param_value = study.sampler.sample_independent(
-            study, trial, self.name, self.distribution
-        )
-        param_value_in_internal_repr = self.distribution.to_internal_repr(param_value)
-        study.storage.set_trial_param(
-            self.trial_id, self.name, self.distribution, param_value_in_internal_repr
-        )
-        conn.send(param_value)
-
-
-class Report(Command):
-    def __init__(self, trial_id: int, step: int, value: float) -> None:
-        self.trial_id = trial_id
-        self.step = step
-        self.value = value
-
-    def execute(self, study: "Study", conn: Connection) -> None:
-        study.storage.set_trial_intermediate_value(self.trial_id, self.step, self.value)
-
-
-class ShouldPrune(Command):
-    def __init__(self, trial_id: int) -> None:
-        self.trial_id = trial_id
-
-    def execute(self, study: "Study", conn: Connection) -> None:
-        trial = study.storage.get_trial(self.trial_id)
-        should_prune = study.pruner.prune(study, trial)
-        conn.send(should_prune)
-
-
-class Finish(Command):
-    def __init__(self, trial_id: int, value: float) -> None:
-        self.trial_id = trial_id
-        self.value = value
-
-    def execute(self, study: "Study", conn: Connection) -> None:
-        study.storage.set_trial_value(self.trial_id, self.value)
-        study.storage.set_trial_state(self.trial_id, "completed")
-        print(f"trial_id={self.trial_id} is completed with value={self.value}")
-
-
-class Failed(Command):
-    def __init__(self, trial_id: int, e: Exception) -> None:
-        self.trial_id = trial_id
-        self.e = e
-
-    def execute(self, study: "Study", conn: Connection) -> None:
-        study.storage.set_trial_state(self.trial_id, "failed")
-        print(f"trial_id={self.trial_id} is failed by {self.e}")
-
-
-class Pruned(Command):
-    def __init__(self, trial_id: int) -> None:
-        self.trial_id = trial_id
-
-    def execute(self, study: "Study", conn: Connection) -> None:
-        frozen_trial = study.storage.get_trial(self.trial_id)
-        last_step = frozen_trial.last_step
-        assert last_step is not None
-        value = frozen_trial.intermediate_values[last_step]
-
-        study.storage.set_trial_value(self.trial_id, value)
-        study.storage.set_trial_state(self.trial_id, "pruned")
-        print(f"trial_id={self.trial_id} is pruned at step={last_step} value={value}")
-
-
 class Trial:
     def __init__(self, study: "Study", trial_id: int):
         self.study = study
@@ -282,6 +200,82 @@ class Trial:
     def should_prune(self) -> bool:
         trial = self.study.storage.get_trial(self.trial_id)
         return self.study.pruner.prune(self.study, trial)
+
+
+class Command(abc.ABC):
+    @abc.abstractmethod
+    def execute(self, study: "Study", conn: Connection):
+        ...
+
+
+class Suggest(Command):
+    def __init__(
+        self, trial_id: int, name: str, distribution: BaseDistribution
+    ) -> None:
+        self.trial_id = trial_id
+        self.name = name
+        self.distribution = distribution
+
+    def execute(self, study: "Study", conn: Connection) -> None:
+        trial = Trial(study, self.trial_id)
+        param_value = trial._suggest(self.name, self.distribution)
+        conn.send(param_value)
+
+
+class Report(Command):
+    def __init__(self, trial_id: int, step: int, value: float) -> None:
+        self.trial_id = trial_id
+        self.step = step
+        self.value = value
+
+    def execute(self, study: "Study", conn: Connection) -> None:
+        trial = Trial(study, self.trial_id)
+        trial.report(self.value, self.step)
+
+
+class ShouldPrune(Command):
+    def __init__(self, trial_id: int) -> None:
+        self.trial_id = trial_id
+
+    def execute(self, study: "Study", conn: Connection) -> None:
+        trial = Trial(study, self.trial_id)
+        conn.send(trial.should_prune())
+
+
+class Finish(Command):
+    def __init__(self, trial_id: int, value: float) -> None:
+        self.trial_id = trial_id
+        self.value = value
+
+    def execute(self, study: "Study", conn: Connection) -> None:
+        study.storage.set_trial_value(self.trial_id, self.value)
+        study.storage.set_trial_state(self.trial_id, "completed")
+        print(f"trial_id={self.trial_id} is completed with value={self.value}")
+
+
+class Failed(Command):
+    def __init__(self, trial_id: int, e: Exception) -> None:
+        self.trial_id = trial_id
+        self.e = e
+
+    def execute(self, study: "Study", conn: Connection) -> None:
+        study.storage.set_trial_state(self.trial_id, "failed")
+        print(f"trial_id={self.trial_id} is failed by {self.e}")
+
+
+class Pruned(Command):
+    def __init__(self, trial_id: int) -> None:
+        self.trial_id = trial_id
+
+    def execute(self, study: "Study", conn: Connection) -> None:
+        frozen_trial = study.storage.get_trial(self.trial_id)
+        last_step = frozen_trial.last_step
+        assert last_step is not None
+        value = frozen_trial.intermediate_values[last_step]
+
+        study.storage.set_trial_value(self.trial_id, value)
+        study.storage.set_trial_state(self.trial_id, "pruned")
+        print(f"trial_id={self.trial_id} is pruned at step={last_step} value={value}")
 
 
 class IPCTrial:
