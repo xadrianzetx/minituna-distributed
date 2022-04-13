@@ -6,7 +6,6 @@ from multiprocessing import Process
 from multiprocessing.connection import Connection
 from multiprocessing.connection import wait
 import random
-import sys
 from typing import Any
 from typing import Callable
 from typing import cast
