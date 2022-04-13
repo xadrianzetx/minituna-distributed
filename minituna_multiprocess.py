@@ -383,12 +383,6 @@ class Study:
                 cmd = Pruned(trial.trial_id)
                 trial.conn.send(cmd)
 
-            except EOFError:
-                # Master was killed and we are orphaned now.
-                # At least I hope that pipes are closed to raise this
-                # exception when it happens.
-                sys.exit(0)
-
             except Exception as e:
                 cmd = Failed(trial.trial_id, e)
                 trial.conn.send(cmd)
@@ -407,11 +401,11 @@ class Study:
             # https://docs.python.org/3/library/signal.html#note-on-signal-handlers-and-exceptions
             p = Process(target=_objective_wrapper, args=(trial,))
             p.daemon = True
+            p.start()
 
             # Closing our end of worker connection as in
             # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.wait
             connections.append(master)
-            p.start()
             worker.close()
 
         while connections:
