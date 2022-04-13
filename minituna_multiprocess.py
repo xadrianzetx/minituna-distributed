@@ -401,7 +401,12 @@ class Study:
             master, worker = Pipe()
             trial_id = self.storage.create_new_trial()
             trial = IPCTrial(trial_id, worker)
+
+            # Alternatively introduce handlers for SIGINT and SIGKILL
+            # to make sure all child processes are killed before we crash.
+            # https://docs.python.org/3/library/signal.html#note-on-signal-handlers-and-exceptions
             p = Process(target=_objective_wrapper, args=(trial,))
+            p.daemon = True
 
             # Closing our end of worker connection as in
             # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.wait
