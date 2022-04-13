@@ -1,6 +1,6 @@
 # type: ignore
 
-import minituna_v3 as minituna
+import minituna_multiprocess as minituna
 
 from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
@@ -21,9 +21,9 @@ x_train, x_valid, y_train, y_valid = train_test_split(data, target)
 def objective(trial):
     clf = MLPClassifier(
         hidden_layer_sizes=tuple(
-            [trial.suggest_int("n_units_l{}".format(i), 32, 64) for i in range(3)]
+            [trial.suggest_float("n_units_l{}".format(i), 32, 64, step=1.0) for i in range(3)]
         ),
-        learning_rate_init=trial.suggest_loguniform("lr_init", 1e-5, 1e-1),
+        learning_rate_init=trial.suggest_float("lr_init", 1e-5, 1e-1, log=True),
     )
 
     for step in range(100):
