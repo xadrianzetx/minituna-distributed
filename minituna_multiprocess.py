@@ -196,7 +196,18 @@ class Suggest(Command):
 
     def execute(self, study: "Study", conn: Connection) -> None:
         trial = Trial(study, self.trial_id)
-        param_value = trial._suggest(self.name, self.distribution)
+        if isinstance(self.distribution, FloatDistribution):
+            param_value = trial.suggest_float(
+                self.name,
+                self.distribution.low,
+                self.distribution.high,
+                step=self.distribution.step,
+                log=self.distribution.log,
+            )
+        elif isinstance(self.distribution, CategoricalDistribution):
+            param_value = trial.suggest_categorical(self.name, self.distribution.choices)
+        else:
+            raise ValueError("Unknown distribution")
         conn.send(param_value)
 
 
