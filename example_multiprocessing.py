@@ -5,8 +5,8 @@ import minituna_multiprocess as minituna
 
 
 def objective(trial: minituna.Trial) -> float:
-    x = trial.suggest_uniform("x", 0, 10)
-    y = trial.suggest_uniform("y", 0, 10)
+    x = trial.suggest_float("x", 0, 10)
+    y = trial.suggest_float("y", 0, 10)
     time.sleep(random.randint(0, 2))
     return (x - 3) ** 2 + (y - 5) ** 2
 

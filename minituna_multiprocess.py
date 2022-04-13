@@ -37,40 +37,24 @@ class BaseDistribution(abc.ABC):
         ...
 
 
-class UniformDistribution(BaseDistribution):
-    def __init__(self, low: float, high: float) -> None:
+class FloatDistribution(BaseDistribution):
+    def __init__(
+        self, low: float, high: float, log: bool = False, step: Optional[float] = None
+    ) -> None:
         self.low = low
         self.high = high
+        self.log = log
+        self.step = step
 
     def to_internal_repr(self, external_repr: Any) -> float:
+        if self.step is not None:
+            return float(external_repr)
         return external_repr
 
     def to_external_repr(self, internal_repr: float) -> Any:
+        if self.step is not None:
+            return int(internal_repr)
         return internal_repr
-
-
-class LogUniformDistribution(BaseDistribution):
-    def __init__(self, low: float, high: float) -> None:
-        self.low = low
-        self.high = high
-
-    def to_internal_repr(self, external_repr: Any) -> float:
-        return external_repr
-
-    def to_external_repr(self, internal_repr: float) -> Any:
-        return internal_repr
-
-
-class IntUniformDistribution(BaseDistribution):
-    def __init__(self, low: int, high: int) -> None:
-        self.low = low
-        self.high = high
-
-    def to_internal_repr(self, external_repr: Any) -> float:
-        return float(external_repr)
-
-    def to_external_repr(self, internal_repr: float) -> Any:
-        return int(internal_repr)
 
 
 class CategoricalDistribution(BaseDistribution):
@@ -174,14 +158,16 @@ class Trial:
         storage.set_trial_param(self.trial_id, name, distribution, param_value_in_internal_repr)
         return param_value
 
-    def suggest_uniform(self, name: str, low: float, high: float) -> float:
-        return self._suggest(name, UniformDistribution(low=low, high=high))
-
-    def suggest_loguniform(self, name: str, low: float, high: float) -> float:
-        return self._suggest(name, LogUniformDistribution(low=low, high=high))
-
-    def suggest_int(self, name: str, low: int, high: int) -> int:
-        return self._suggest(name, IntUniformDistribution(low=low, high=high))
+    def suggest_float(
+        self,
+        name: str,
+        low: float,
+        high: float,
+        *,
+        step: Optional[float] = None,
+        log: bool = False,
+    ):
+        return self._suggest(name, FloatDistribution(low, high, log, step))
 
     def suggest_categorical(
         self, name: str, choices: List[CategoricalChoiceType]
@@ -285,14 +271,16 @@ class IPCTrial:
 
         return param_value
 
-    def suggest_uniform(self, name: str, low: float, high: float) -> float:
-        return self._suggest(name, UniformDistribution(low=low, high=high))
-
-    def suggest_loguniform(self, name: str, low: float, high: float) -> float:
-        return self._suggest(name, LogUniformDistribution(low=low, high=high))
-
-    def suggest_int(self, name: str, low: int, high: int) -> int:
-        return self._suggest(name, IntUniformDistribution(low=low, high=high))
+    def suggest_float(
+        self,
+        name: str,
+        low: float,
+        high: float,
+        *,
+        step: Optional[float] = None,
+        log: bool = False,
+    ):
+        return self._suggest(name, FloatDistribution(low, high, log, step))
 
     def suggest_categorical(
         self, name: str, choices: List[CategoricalChoiceType]
@@ -325,14 +313,15 @@ class Sampler:
         name: str,
         distribution: BaseDistribution,
     ) -> Any:
-        if isinstance(distribution, UniformDistribution):
-            return self.rng.uniform(distribution.low, distribution.high)
-        elif isinstance(distribution, LogUniformDistribution):
-            log_low = math.log(distribution.low)
-            log_high = math.log(distribution.high)
-            return math.exp(self.rng.uniform(log_low, log_high))
-        elif isinstance(distribution, IntUniformDistribution):
-            return self.rng.randint(distribution.low, distribution.high)
+        if isinstance(distribution, FloatDistribution):
+            if distribution.log:
+                log_low = math.log(distribution.low)
+                log_high = math.log(distribution.high)
+                return math.exp(self.rng.uniform(log_low, log_high))
+            elif distribution.step is not None:
+                return self.rng.randint(distribution.low, distribution.high)
+            else:
+                return self.rng.uniform(distribution.low, distribution.high)
         elif isinstance(distribution, CategoricalDistribution):
             index = self.rng.randint(0, len(distribution.choices) - 1)
             return distribution.choices[index]
