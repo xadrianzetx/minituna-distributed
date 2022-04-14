@@ -181,13 +181,13 @@ class Trial:
         return self.study.pruner.prune(self.study, trial)
 
 
-class Command(abc.ABC):
+class BaseCommand(abc.ABC):
     @abc.abstractmethod
     def execute(self, study: "Study", conn: Connection):
         ...
 
 
-class Suggest(Command):
+class SuggestCommand(BaseCommand):
     def __init__(self, trial_id: int, name: str, distribution: BaseDistribution) -> None:
         self.trial_id = trial_id
         self.name = name
@@ -210,7 +210,7 @@ class Suggest(Command):
         conn.send(param_value)
 
 
-class Report(Command):
+class ReportCommand(BaseCommand):
     def __init__(self, trial_id: int, step: int, value: float) -> None:
         self.trial_id = trial_id
         self.step = step
@@ -221,7 +221,7 @@ class Report(Command):
         trial.report(self.value, self.step)
 
 
-class ShouldPrune(Command):
+class ShouldPruneCommand(BaseCommand):
     def __init__(self, trial_id: int) -> None:
         self.trial_id = trial_id
 
@@ -230,7 +230,7 @@ class ShouldPrune(Command):
         conn.send(trial.should_prune())
 
 
-class Finish(Command):
+class TrialFinishedCommand(BaseCommand):
     def __init__(self, trial_id: int, value: float) -> None:
         self.trial_id = trial_id
         self.value = value
@@ -241,7 +241,7 @@ class Finish(Command):
         print(f"trial_id={self.trial_id} is completed with value={self.value}")
 
 
-class Failed(Command):
+class TrialFailedCommand(BaseCommand):
     def __init__(self, trial_id: int, e: Exception) -> None:
         self.trial_id = trial_id
         self.e = e
@@ -251,7 +251,7 @@ class Failed(Command):
         print(f"trial_id={self.trial_id} is failed by {self.e}")
 
 
-class Pruned(Command):
+class TrialPrunedCommand(BaseCommand):
     def __init__(self, trial_id: int) -> None:
         self.trial_id = trial_id
 
@@ -273,7 +273,7 @@ class IPCTrial:
 
     def _suggest(self, name: str, distribution: BaseDistribution) -> Any:
         try:
-            cmd = Suggest(self.trial_id, name, distribution)
+            cmd = SuggestCommand(self.trial_id, name, distribution)
             self.conn.send(cmd)
             param_value = self.conn.recv()
         except EOFError:
@@ -298,12 +298,12 @@ class IPCTrial:
         return self._suggest(name, CategoricalDistribution(choices=choices))
 
     def report(self, value: float, step: int) -> None:
-        cmd = Report(self.trial_id, step, value)
+        cmd = ReportCommand(self.trial_id, step, value)
         self.conn.send(cmd)
 
     def should_prune(self) -> bool:
         try:
-            cmd = ShouldPrune(self.trial_id)
+            cmd = ShouldPruneCommand(self.trial_id)
             self.conn.send(cmd)
             should_prune = self.conn.recv()
         except EOFError:
@@ -375,15 +375,15 @@ class Study:
         def _objective_wrapper(trial: IPCTrial) -> None:
             try:
                 value_or_values = objective(trial)
-                cmd = Finish(trial.trial_id, value_or_values)
+                cmd = TrialFinishedCommand(trial.trial_id, value_or_values)
                 trial.conn.send(cmd)
 
             except TrialPruned:
-                cmd = Pruned(trial.trial_id)
+                cmd = TrialPrunedCommand(trial.trial_id)
                 trial.conn.send(cmd)
 
             except Exception as e:
-                cmd = Failed(trial.trial_id, e)
+                cmd = TrialFailedCommand(trial.trial_id, e)
                 trial.conn.send(cmd)
 
             finally:
@@ -415,7 +415,7 @@ class Study:
                     # with data produced by objective function required to
                     # perform the operation. Connection to the worker is
                     # also included since we might need to send a response.
-                    command: Command = conn.recv()
+                    command: BaseCommand = conn.recv()
                     command.execute(self, conn)
 
                 except EOFError:
