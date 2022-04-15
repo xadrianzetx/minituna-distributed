@@ -1,7 +1,7 @@
 import random
 import time
 
-import minituna_multiprocess as minituna
+import minituna_multiprocess_pool as minituna
 
 
 def objective(trial: minituna.Trial) -> float:
@@ -14,7 +14,7 @@ def objective(trial: minituna.Trial) -> float:
 if __name__ == "__main__":
     start = time.time()
     study = minituna.create_study()
-    study.optimize(objective, 10)
+    study.optimize(objective, 10, n_jobs=-1)
     best_trial = study.best_trial
     elapsed = time.time() - start
     print(
