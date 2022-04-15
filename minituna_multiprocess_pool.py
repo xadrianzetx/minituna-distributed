@@ -434,8 +434,8 @@ class Study:
                     # and should cleanup before exiting.
                     pool.remove(conn)
 
-            if len(pool) < n_jobs and n_trials > 0:
-                new_workers = min(n_jobs - len(pool), n_trials)
+            new_workers = min(n_jobs - len(pool), n_trials)
+            if new_workers > 0:
                 pool.extend(self._spawn(new_workers, _objective_wrapper))
                 n_trials -= new_workers
 
