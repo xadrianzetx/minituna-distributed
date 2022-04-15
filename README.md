@@ -24,10 +24,12 @@ Possible drawbacks:
 
 ## Implementation
 
-Working example was build on top of `minituna_v3,py` and can be found in `minituna_multiprocess.py`. Changes include:
+Working example was build on top of `minituna_v3.py` and can be found in `minituna_multiprocess.py`. Changes include:
 
 * New implementation of `Study.optimize`, which now is responsible for spawning processes, initializing and maintaining communication with workers
 * `IPCTrial` class which holds communication with main process on the worker side
 * Simple IPC protocol done via implementations of `Command` base class
 
-You can run `example_multiprocessing.py` or `example_pruning.py` to see it in action.
+Alternatively, there is `minituna_multiprocess_pool.py` which also includes `n_jobs` argument in `Study.optimize` and implements simple process pool.
+
+You can run `example_multiprocessing.py` or `example_pruning.py` to see multiprocessing in action.
