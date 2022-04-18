@@ -16,6 +16,7 @@ if __name__ == "__main__":
     study = minituna.create_study()
     study.optimize(objective, 10, n_jobs=-1)
     best_trial = study.best_trial
+    assert best_trial is not None
     elapsed = time.time() - start
     print(
         f"Best trial: value={best_trial.value} params={best_trial.params}. Elapsed: {elapsed:.2f}"

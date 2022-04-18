@@ -267,7 +267,7 @@ class TrialPrunedCommand(BaseCommand):
         print(f"trial_id={self.trial_id} is pruned at step={last_step} value={value}")
 
 
-class IPCTrial:
+class IPCTrial(Trial):
     def __init__(self, trial_id: int, conn: Connection) -> None:
         self.trial_id = trial_id
         self.conn = conn
@@ -330,7 +330,7 @@ class Sampler:
                 log_high = math.log(distribution.high)
                 return math.exp(self.rng.uniform(log_low, log_high))
             elif distribution.step is not None:
-                return self.rng.randint(distribution.low, distribution.high)
+                return self.rng.randint(int(distribution.low), int(distribution.high))
             else:
                 return self.rng.uniform(distribution.low, distribution.high)
         elif isinstance(distribution, CategoricalDistribution):
@@ -391,8 +391,9 @@ class Study:
 
         return connections
 
-    def optimize(self, objective: Callable[[Trial], float], n_trials: int, n_jobs: int) -> None:
+    def optimize(self, objective: Callable[[IPCTrial], float], n_trials: int, n_jobs: int) -> None:
         def _objective_wrapper(trial: IPCTrial) -> None:
+            cmd: BaseCommand
             try:
                 value_or_values = objective(trial)
                 cmd = TrialFinishedCommand(trial.trial_id, value_or_values)
@@ -418,13 +419,14 @@ class Study:
 
         while pool:
             for conn in wait(pool):
+                assert isinstance(conn, Connection)
                 try:
                     # Worker sends command that should be executed
                     # with study resources (storage, sampler etc.) along
                     # with data produced by objective function required to
                     # perform the operation. Connection to the worker is
                     # also included since we might need to send a response.
-                    command: BaseCommand = conn.recv()
+                    command = conn.recv()
                     command.execute(self, conn)
 
                 except EOFError:
