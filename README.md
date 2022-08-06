@@ -20,7 +20,7 @@ Possible drawbacks:
 
 * IPC protocol to maintain (added code complexity)
 * Additional safety measures needed to ensure processes are disposed of correctly
-* This won't scale to multi machine setups
+* ~~This won't scale to multi machine setups~~ (Maybe?)
 
 ## Implementation
 
@@ -29,7 +29,6 @@ Working example was build on top of `minituna_v3.py` and can be found in `minitu
 * New implementation of `Study.optimize`, which now is responsible for spawning processes, initializing and maintaining communication with workers
 * `IPCTrial` class which holds communication with main process on the worker side
 * Simple IPC protocol done via implementations of `Command` base class
+* Minimalistic process pool controller, with number of workers set via `n_jobs` argument.
 
-Alternatively, there is `minituna_multiprocess_pool.py` which also includes `n_jobs` argument in `Study.optimize` and implements simple process pool.
-
-You can run `example_multiprocessing.py` or `example_pruning.py` to see multiprocessing in action.
+You can run any of the examples to see multiprocessing in action.
