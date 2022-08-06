@@ -1,6 +1,7 @@
 import abc
 import copy
 import math
+import multiprocessing
 from multiprocessing import Pipe
 from multiprocessing import Process
 from multiprocessing.connection import Connection
@@ -266,7 +267,7 @@ class TrialPrunedCommand(BaseCommand):
         print(f"trial_id={self.trial_id} is pruned at step={last_step} value={value}")
 
 
-class IPCTrial:
+class IPCTrial(Trial):
     def __init__(self, trial_id: int, conn: Connection) -> None:
         self.trial_id = trial_id
         self.conn = conn
@@ -329,7 +330,7 @@ class Sampler:
                 log_high = math.log(distribution.high)
                 return math.exp(self.rng.uniform(log_low, log_high))
             elif distribution.step is not None:
-                return self.rng.randint(distribution.low, distribution.high)
+                return self.rng.randint(int(distribution.low), int(distribution.high))
             else:
                 return self.rng.uniform(distribution.low, distribution.high)
         elif isinstance(distribution, CategoricalDistribution):
@@ -371,8 +372,28 @@ class Study:
         self.sampler = sampler
         self.pruner = pruner
 
-    def optimize(self, objective: Callable[[Trial], float], n_trials: int) -> None:
+    def _spawn(self, n_workers: int, target: Callable) -> List[Connection]:
+        connections: List[Connection] = []
+        for _ in range(n_workers):
+            master, worker = Pipe()
+            trial_id = self.storage.create_new_trial()
+            trial = IPCTrial(trial_id, worker)
+
+            # Alternatively introduce handlers for SIGINT and SIGKILL
+            # to make sure all child processes are killed before we crash.
+            # https://docs.python.org/3/library/signal.html#note-on-signal-handlers-and-exceptions
+            Process(target=target, args=(trial,), daemon=True).start()
+
+            # Closing our end of worker connection as in
+            # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.wait
+            connections.append(master)
+            worker.close()
+
+        return connections
+
+    def optimize(self, objective: Callable[[IPCTrial], float], n_trials: int, n_jobs: int) -> None:
         def _objective_wrapper(trial: IPCTrial) -> None:
+            cmd: BaseCommand
             try:
                 value_or_values = objective(trial)
                 cmd = TrialFinishedCommand(trial.trial_id, value_or_values)
@@ -389,33 +410,23 @@ class Study:
             finally:
                 trial.conn.close()
 
-        connections: List[Connection] = []
-        for _ in range(n_trials):
-            master, worker = Pipe()
-            trial_id = self.storage.create_new_trial()
-            trial = IPCTrial(trial_id, worker)
+        if n_jobs <= 0:
+            n_jobs = multiprocessing.cpu_count()
 
-            # Alternatively introduce handlers for SIGINT and SIGKILL
-            # to make sure all child processes are killed before we crash.
-            # https://docs.python.org/3/library/signal.html#note-on-signal-handlers-and-exceptions
-            p = Process(target=_objective_wrapper, args=(trial,))
-            p.daemon = True
-            p.start()
+        initial_workers = min(n_jobs, n_trials)
+        pool = self._spawn(initial_workers, _objective_wrapper)
+        n_trials -= initial_workers
 
-            # Closing our end of worker connection as in
-            # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.wait
-            connections.append(master)
-            worker.close()
-
-        while connections:
-            for conn in wait(connections):
+        while pool:
+            for conn in wait(pool):
+                assert isinstance(conn, Connection)
                 try:
                     # Worker sends command that should be executed
                     # with study resources (storage, sampler etc.) along
                     # with data produced by objective function required to
                     # perform the operation. Connection to the worker is
                     # also included since we might need to send a response.
-                    command: BaseCommand = conn.recv()
+                    command = conn.recv()
                     command.execute(self, conn)
 
                 except EOFError:
@@ -423,7 +434,12 @@ class Study:
                     # At the moment only workers control connection closing,
                     # which is probably bad, since master can be interrupted,
                     # and should cleanup before exiting.
-                    connections.remove(conn)
+                    pool.remove(conn)
+
+            new_workers = min(n_jobs - len(pool), n_trials)
+            if new_workers > 0:
+                pool.extend(self._spawn(new_workers, _objective_wrapper))
+                n_trials -= new_workers
 
     @property
     def best_trial(self) -> Optional[FrozenTrial]:
