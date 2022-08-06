@@ -1,10 +1,10 @@
 # type: ignore
 
-import minituna_multiprocess as minituna
-
 from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
+
+import minituna_multiprocess as minituna
 
 
 mnist = fetch_openml(name="Fashion-MNIST", version=1)
@@ -42,7 +42,7 @@ def objective(trial):
 
 if __name__ == "__main__":
     study = minituna.create_study()
-    study.optimize(objective, 30)
+    study.optimize(objective, 30, n_jobs=-1)
 
     best_trial = study.best_trial
     print(f"Best trial: value={best_trial.value} params={best_trial.params}")

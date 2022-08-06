@@ -1,10 +1,12 @@
+# type: ignore
+
 import random
 import time
 
-import minituna_multiprocess_pool as minituna
+import minituna_multiprocess as minituna
 
 
-def objective(trial: minituna.Trial) -> float:
+def objective(trial):
     x = trial.suggest_float("x", 0, 10)
     y = trial.suggest_float("y", 0, 10)
     time.sleep(random.randint(0, 2))
