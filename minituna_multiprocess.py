@@ -273,13 +273,9 @@ class IPCTrial(Trial):
         self.conn = conn
 
     def _suggest(self, name: str, distribution: BaseDistribution) -> Any:
-        try:
-            cmd = SuggestCommand(self.trial_id, name, distribution)
-            self.conn.send(cmd)
-            param_value = self.conn.recv()
-        except EOFError:
-            raise
-
+        cmd = SuggestCommand(self.trial_id, name, distribution)
+        self.conn.send(cmd)
+        param_value = self.conn.recv()
         return param_value
 
     def suggest_float(
@@ -303,13 +299,9 @@ class IPCTrial(Trial):
         self.conn.send(cmd)
 
     def should_prune(self) -> bool:
-        try:
-            cmd = ShouldPruneCommand(self.trial_id)
-            self.conn.send(cmd)
-            should_prune = self.conn.recv()
-        except EOFError:
-            raise
-
+        cmd = ShouldPruneCommand(self.trial_id)
+        self.conn.send(cmd)
+        should_prune = self.conn.recv()
         return should_prune
 
 
@@ -431,9 +423,6 @@ class Study:
 
                 except EOFError:
                     # Raised when worker process closes connection and exits.
-                    # At the moment only workers control connection closing,
-                    # which is probably bad, since master can be interrupted,
-                    # and should cleanup before exiting.
                     pool.remove(conn)
 
             new_workers = min(n_jobs - len(pool), n_trials)
