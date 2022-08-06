@@ -166,7 +166,7 @@ class Trial:
         *,
         step: Optional[float] = None,
         log: bool = False,
-    ):
+    ) -> float:
         return self._suggest(name, FloatDistribution(low, high, log, step))
 
     def suggest_categorical(
@@ -286,7 +286,7 @@ class IPCTrial(Trial):
         *,
         step: Optional[float] = None,
         log: bool = False,
-    ):
+    ) -> float:
         return self._suggest(name, FloatDistribution(low, high, log, step))
 
     def suggest_categorical(
@@ -364,7 +364,7 @@ class Study:
         self.sampler = sampler
         self.pruner = pruner
 
-    def _spawn(self, n_workers: int, target: Callable) -> List[Connection]:
+    def _spawn(self, n_workers: int, target: Callable[[IPCTrial], None]) -> List[Connection]:
         connections: List[Connection] = []
         for _ in range(n_workers):
             master, worker = Pipe()
