@@ -3,7 +3,6 @@
 import random
 import time
 
-# from dask.distributed import Client
 import minituna_distributed as minituna
 
 
