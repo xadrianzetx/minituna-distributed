@@ -4,7 +4,7 @@ from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPClassifier
 
-import minituna_multiprocess as minituna
+import minituna_distributed as minituna
 
 
 mnist = fetch_openml(name="Fashion-MNIST", version=1)

@@ -5,7 +5,7 @@ import sklearn.ensemble
 import sklearn.model_selection
 import sklearn.svm
 
-import minituna_multiprocess as minituna
+import minituna_distributed as minituna
 
 
 def objective(trial):
@@ -29,7 +29,7 @@ def objective(trial):
 
 if __name__ == "__main__":
     study = minituna.create_study()
-    study.optimize(objective, 10, n_jobs=-1)
+    study.optimize(objective, 10)
 
     best_trial = study.best_trial
     print(f"Best trial: value={best_trial.value} params={best_trial.params}")
