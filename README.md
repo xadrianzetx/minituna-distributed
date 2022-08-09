@@ -1,34 +1,18 @@
-# Minituna-multiprocess
+# Minituna-distributed
 
-This is yet another POC for process based parallelism in [Optuna](https://github.com/optuna/optuna), based on fork of awesome [Minituna](https://github.com/CyberAgentAILab/minituna) toy hyperparameter optimization framework.
+A distributed optimization POC for [Optuna](https://github.com/optuna/optuna), based on fork of awesome [Minituna](https://github.com/CyberAgentAILab/minituna) toy hyperparameter optimization framework.
 
 ## Core idea
 
-The idea is to keep study resources (storage, sampler etc.) only in main process and access them sequentially for simplicity, but keep "heavy" parts such as objective function evaluation distributed for efficiecy. This is done by custom `Trial` implemetation, which runs with user defined objective function in worker process and is able to issue simple commands to main process (via pipes) such as suggest parameter or report intermediate value, and recieve responses. Main process is then tasked with queueing and evaluating those commands in sequential manner against study resources. From study perspective we are performing simple sequential optimization, but in reality workload is distributed.
-
-Main characteristics:
-
-* No shared memory between processes
-* No need for locks, no race conditions in storage
-* Users do not need to invoke special storage instance to enable multiprocessing. All IPC related classes are internal
-* 'n_jobs' argument can control number of spawned processes, or can be removed and workers pool controlled automatically
-* No changes to existing Optuna public APIs
-* Minimal dependencies sent over to workers (user defined objective function + some thin wrapper)
-* Simplified (sequential) interaction with callbacks, progress bar etc. in multiprocess mode
-
-Possible drawbacks:
-
-* IPC protocol to maintain (added code complexity)
-* Additional safety measures needed to ensure processes are disposed of correctly
-* ~~This won't scale to multi machine setups~~ (Maybe?)
+Much like in [`minituna-multiprocess`](https://github.com/xadrianzetx/minituna-multiprocess), the idea is to distribute execution of trials across workers (in this case different physical machines) as tasks and keep study and its resources (storage, sampler etc.) local in client process (see rationale behind that in `minituna-multiprocess` README file). Task scheduler, client, cluster deployment and coordination primitives (pubsub) are provided by [dask](https://docs.dask.org/en/stable/).
 
 ## Implementation
 
-Working example was build on top of `minituna_v3.py` and can be found in `minituna_multiprocess.py`. Changes include:
+Working example was build on top of `minituna_v3.py` and can be found in `minituna_distributed.py`. Changes include:
 
-* New implementation of `Study.optimize`, which now is responsible for spawning processes, initializing and maintaining communication with workers
-* `IPCTrial` class which holds communication with main process on the worker side
-* Simple IPC protocol done via implementations of `Command` base class
-* Minimalistic process pool controller, with number of workers set via `n_jobs` argument.
+* New implementation of `Study.optimize`, which now is responsible for spawning tasks, initializing and maintaining communication with workers
+* `DistributedTrial` class which holds communication with main process on the worker side
+* Simple communication protocol done via implementations of `Command` base class
+* Minimalistic optimization process controller
 
-You can run any of the examples to see multiprocessing in action.
+All examples can be executed out-of-the-box thanks to [local cluster](https://docs.dask.org/en/latest/deploying-python.html#localcluster) provided by dask. However, these are much cooler when running on multiple physical machines. To achieve that, deploy a small [dask cluster](https://docs.dask.org/en/stable/deploying.html) (Raspberry Pis are fine!), instantiate [dask client](https://docs.dask.org/en/latest/futures.html#distributed.Client) and point it at your cluster scheduler.
