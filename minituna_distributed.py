@@ -1,12 +1,8 @@
 import abc
 import copy
 import math
-import multiprocessing
-from multiprocessing import Pipe
-from multiprocessing import Process
-from multiprocessing.connection import Connection
-from multiprocessing.connection import wait
 import random
+import socket
 from typing import Any
 from typing import Callable
 from typing import cast
@@ -15,7 +11,11 @@ from typing import List
 from typing import Literal
 from typing import Optional
 from typing import Union
+import uuid
 
+from dask.distributed import Client
+from dask.distributed import Pub
+from dask.distributed import Sub
 import numpy as np
 
 
@@ -182,9 +182,31 @@ class Trial:
         return self.study.pruner.prune(self.study, trial)
 
 
+class OptimizationManager:
+    def __init__(self, n_trials: int) -> None:
+        self._n_trials = n_trials
+        self._finished_trials = 0
+        self.common_topic = str(uuid.uuid4())
+        self._private_topics: Dict[int, str] = {}
+
+    def assign_private_topic(self, trial_id: int) -> str:
+        topic = str(uuid.uuid4())
+        self._private_topics[trial_id] = topic
+        return topic
+
+    def get_private_topic(self, trial_id: int) -> str:
+        return self._private_topics[trial_id]
+
+    def register_finished_trial(self, trial_id: int) -> None:
+        self._finished_trials += 1
+
+    def should_end_optimization(self) -> bool:
+        return self._finished_trials == self._n_trials
+
+
 class BaseCommand(abc.ABC):
     @abc.abstractmethod
-    def execute(self, study: "Study", conn: Connection):
+    def execute(self, study: "Study", manager: OptimizationManager):
         ...
 
 
@@ -194,7 +216,7 @@ class SuggestCommand(BaseCommand):
         self.name = name
         self.distribution = distribution
 
-    def execute(self, study: "Study", conn: Connection) -> None:
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
         trial = Trial(study, self.trial_id)
         if isinstance(self.distribution, FloatDistribution):
             param_value = trial.suggest_float(
@@ -208,7 +230,9 @@ class SuggestCommand(BaseCommand):
             param_value = trial.suggest_categorical(self.name, self.distribution.choices)
         else:
             raise ValueError("Unknown distribution")
-        conn.send(param_value)
+
+        publisher = Pub(manager.get_private_topic(self.trial_id))
+        publisher.put(param_value)
 
 
 class ReportCommand(BaseCommand):
@@ -217,7 +241,7 @@ class ReportCommand(BaseCommand):
         self.step = step
         self.value = value
 
-    def execute(self, study: "Study", conn: Connection) -> None:
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
         trial = Trial(study, self.trial_id)
         trial.report(self.value, self.step)
 
@@ -226,20 +250,23 @@ class ShouldPruneCommand(BaseCommand):
     def __init__(self, trial_id: int) -> None:
         self.trial_id = trial_id
 
-    def execute(self, study: "Study", conn: Connection) -> None:
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
         trial = Trial(study, self.trial_id)
-        conn.send(trial.should_prune())
+        publisher = Pub(manager.get_private_topic(self.trial_id))
+        publisher.put(trial.should_prune())
 
 
 class TrialFinishedCommand(BaseCommand):
-    def __init__(self, trial_id: int, value: float) -> None:
+    def __init__(self, trial_id: int, value: float, host: str) -> None:
         self.trial_id = trial_id
         self.value = value
+        self.host = host  # Just for show :^)
 
-    def execute(self, study: "Study", conn: Connection) -> None:
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
         study.storage.set_trial_value(self.trial_id, self.value)
         study.storage.set_trial_state(self.trial_id, "completed")
-        print(f"trial_id={self.trial_id} is completed with value={self.value}")
+        manager.register_finished_trial(self.trial_id)
+        print(f"trial_id={self.trial_id} is completed with value={self.value} by {self.host}")
 
 
 class TrialFailedCommand(BaseCommand):
@@ -247,8 +274,9 @@ class TrialFailedCommand(BaseCommand):
         self.trial_id = trial_id
         self.e = e
 
-    def execute(self, study: "Study", conn: Connection) -> None:
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
         study.storage.set_trial_state(self.trial_id, "failed")
+        manager.register_finished_trial(self.trial_id)
         print(f"trial_id={self.trial_id} is failed by {self.e}")
 
 
@@ -256,7 +284,7 @@ class TrialPrunedCommand(BaseCommand):
     def __init__(self, trial_id: int) -> None:
         self.trial_id = trial_id
 
-    def execute(self, study: "Study", conn: Connection) -> None:
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
         frozen_trial = study.storage.get_trial(self.trial_id)
         last_step = frozen_trial.last_step
         assert last_step is not None
@@ -264,18 +292,37 @@ class TrialPrunedCommand(BaseCommand):
 
         study.storage.set_trial_value(self.trial_id, value)
         study.storage.set_trial_state(self.trial_id, "pruned")
+        manager.register_finished_trial(self.trial_id)
         print(f"trial_id={self.trial_id} is pruned at step={last_step} value={value}")
 
 
-class IPCTrial(Trial):
-    def __init__(self, trial_id: int, conn: Connection) -> None:
+class DistributedTrial(Trial):
+    def __init__(self, trial_id: int, common_topic: str, private_topic: str) -> None:
         self.trial_id = trial_id
-        self.conn = conn
+        self.common_topic = common_topic
+        self.private_topic = private_topic
+        self._publisher: Optional[Pub] = None
+        self._subscriber: Optional[Sub] = None
+
+    @property
+    def publisher(self) -> Pub:
+        # We need to hold reference to publisher/subscriber
+        # for the entire lifetime of a task, otherwise topic
+        # could get garbage collected.
+        if self._publisher is None:
+            self._publisher = Pub(self.common_topic)
+        return self._publisher
+
+    @property
+    def subscriber(self) -> Sub:
+        if self._subscriber is None:
+            self._subscriber = Sub(self.private_topic)
+        return self._subscriber
 
     def _suggest(self, name: str, distribution: BaseDistribution) -> Any:
         cmd = SuggestCommand(self.trial_id, name, distribution)
-        self.conn.send(cmd)
-        param_value = self.conn.recv()
+        self.publisher.put(cmd)
+        param_value = self.subscriber.get()
         return param_value
 
     def suggest_float(
@@ -296,12 +343,12 @@ class IPCTrial(Trial):
 
     def report(self, value: float, step: int) -> None:
         cmd = ReportCommand(self.trial_id, step, value)
-        self.conn.send(cmd)
+        self.publisher.put(cmd)
 
     def should_prune(self) -> bool:
         cmd = ShouldPruneCommand(self.trial_id)
-        self.conn.send(cmd)
-        should_prune = self.conn.recv()
+        self.publisher.put(cmd)
+        should_prune = self.subscriber.get()
         return should_prune
 
 
@@ -359,76 +406,42 @@ class Pruner:
 
 
 class Study:
-    def __init__(self, storage: Storage, sampler: Sampler, pruner: Pruner) -> None:
+    def __init__(self, storage: Storage, sampler: Sampler, pruner: Pruner, client: Client) -> None:
         self.storage = storage
         self.sampler = sampler
         self.pruner = pruner
+        self.client = client
 
-    def _spawn(self, n_workers: int, target: Callable[[IPCTrial], None]) -> List[Connection]:
-        connections: List[Connection] = []
-        for _ in range(n_workers):
-            master, worker = Pipe()
-            trial_id = self.storage.create_new_trial()
-            trial = IPCTrial(trial_id, worker)
-
-            # Alternatively introduce handlers for SIGINT and SIGKILL
-            # to make sure all child processes are killed before we crash.
-            # https://docs.python.org/3/library/signal.html#note-on-signal-handlers-and-exceptions
-            Process(target=target, args=(trial,), daemon=True).start()
-
-            # Closing our end of worker connection as in
-            # https://docs.python.org/3/library/multiprocessing.html#multiprocessing.connection.wait
-            connections.append(master)
-            worker.close()
-
-        return connections
-
-    def optimize(self, objective: Callable[[IPCTrial], float], n_trials: int, n_jobs: int) -> None:
-        def _objective_wrapper(trial: IPCTrial) -> None:
+    def optimize(self, objective: Callable[[DistributedTrial], float], n_trials: int) -> None:
+        def _objective_wrapper(trial: DistributedTrial) -> None:
             cmd: BaseCommand
             try:
                 value_or_values = objective(trial)
-                cmd = TrialFinishedCommand(trial.trial_id, value_or_values)
-                trial.conn.send(cmd)
+                host = socket.gethostname()
+                cmd = TrialFinishedCommand(trial.trial_id, value_or_values, host)
+                trial.publisher.put(cmd)
 
             except TrialPruned:
                 cmd = TrialPrunedCommand(trial.trial_id)
-                trial.conn.send(cmd)
+                trial.publisher.put(cmd)
 
             except Exception as e:
                 cmd = TrialFailedCommand(trial.trial_id, e)
-                trial.conn.send(cmd)
+                trial.publisher.put(cmd)
 
-            finally:
-                trial.conn.close()
+        manager = OptimizationManager(n_trials)
+        commands = Sub(manager.common_topic)
+        trial_ids = [self.storage.create_new_trial() for _ in range(n_trials)]
+        trials = [
+            DistributedTrial(id, manager.common_topic, manager.assign_private_topic(id))
+            for id in trial_ids
+        ]
+        _ = self.client.map(_objective_wrapper, trials)
 
-        if n_jobs <= 0:
-            n_jobs = multiprocessing.cpu_count()
-
-        initial_workers = min(n_jobs, n_trials)
-        pool = self._spawn(initial_workers, _objective_wrapper)
-        n_trials -= initial_workers
-
-        while pool:
-            for conn in wait(pool):
-                assert isinstance(conn, Connection)
-                try:
-                    # Worker sends command that should be executed
-                    # with study resources (storage, sampler etc.) along
-                    # with data produced by objective function required to
-                    # perform the operation. Connection to the worker is
-                    # also included since we might need to send a response.
-                    command = conn.recv()
-                    command.execute(self, conn)
-
-                except EOFError:
-                    # Raised when worker process closes connection and exits.
-                    pool.remove(conn)
-
-            new_workers = min(n_jobs - len(pool), n_trials)
-            if new_workers > 0:
-                pool.extend(self._spawn(new_workers, _objective_wrapper))
-                n_trials -= new_workers
+        for command in commands:
+            command.execute(self, manager)
+            if manager.should_end_optimization():
+                break
 
     @property
     def best_trial(self) -> Optional[FrozenTrial]:
@@ -439,9 +452,11 @@ def create_study(
     storage: Optional[Storage] = None,
     sampler: Optional[Sampler] = None,
     pruner: Optional[Pruner] = None,
+    client: Optional[Client] = None,
 ) -> Study:
     return Study(
         storage=storage or Storage(),
         sampler=sampler or Sampler(),
         pruner=pruner or Pruner(),
+        client=client or Client(),
     )
