@@ -197,7 +197,7 @@ class OptimizationManager:
     def get_private_topic(self, trial_id: int) -> str:
         return self._private_topics[trial_id]
 
-    def register_finished_trial(self) -> None:
+    def register_trial_exit(self) -> None:
         self._finished_trials += 1
 
     def should_end_optimization(self) -> bool:
@@ -265,7 +265,7 @@ class TrialFinishedCommand(BaseCommand):
     def execute(self, study: "Study", manager: OptimizationManager) -> None:
         study.storage.set_trial_value(self.trial_id, self.value)
         study.storage.set_trial_state(self.trial_id, "completed")
-        manager.register_finished_trial()
+        manager.register_trial_exit()
         print(f"trial_id={self.trial_id} is completed with value={self.value} by {self.host}")
 
 
@@ -276,7 +276,7 @@ class TrialFailedCommand(BaseCommand):
 
     def execute(self, study: "Study", manager: OptimizationManager) -> None:
         study.storage.set_trial_state(self.trial_id, "failed")
-        manager.register_finished_trial()
+        manager.register_trial_exit()
         print(f"trial_id={self.trial_id} is failed by {self.e}")
 
 
@@ -292,7 +292,7 @@ class TrialPrunedCommand(BaseCommand):
 
         study.storage.set_trial_value(self.trial_id, value)
         study.storage.set_trial_state(self.trial_id, "pruned")
-        manager.register_finished_trial()
+        manager.register_trial_exit()
         print(f"trial_id={self.trial_id} is pruned at step={last_step} value={value}")
 
 
