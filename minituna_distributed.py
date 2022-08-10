@@ -436,6 +436,11 @@ class Study:
             DistributedTrial(id, manager.common_topic, manager.assign_private_topic(id))
             for id in trial_ids
         ]
+        # We need to hold reference to futures, even though we technically don't need them,
+        # otherwise task associated with them will be killed by scheduler. We can't just
+        # fire and forget, sice we want to avoid orphaned trials if main process goes down.
+        # TODO(xadrianzetx) We could propably use those futures as a part of heartbeat
+        # mechanism in optimization process manager.
         _ = self.client.map(_objective_wrapper, trials)
 
         for command in commands:
