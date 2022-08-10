@@ -439,7 +439,7 @@ class Study:
         # We need to hold reference to futures, even though we technically don't need them,
         # otherwise task associated with them will be killed by scheduler. We can't just
         # fire and forget, sice we want to avoid orphaned trials if main process goes down.
-        # TODO(xadrianzetx) We could propably use those futures as a part of heartbeat
+        # TODO(xadrianzetx) We could probably use those futures as a part of heartbeat
         # mechanism in optimization process manager.
         _ = self.client.map(_objective_wrapper, trials)
 
