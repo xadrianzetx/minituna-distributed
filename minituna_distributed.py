@@ -14,6 +14,7 @@ from typing import Union
 import uuid
 
 from dask.distributed import Client
+from dask.distributed import Future
 from dask.distributed import Pub
 from dask.distributed import Sub
 import numpy as np
@@ -182,10 +183,26 @@ class Trial:
         return self.study.pruner.prune(self.study, trial)
 
 
+class OptimizationHeartbeat:
+    def __init__(self, manager: "OptimizationManager") -> None:
+
+        # A hook for periodic checkups would be nice as well.
+        self._manager = manager
+
+    def attach(self, future: Future) -> None:
+        if future.status in ["error", "cancelled"]:
+            # In case future failed before execution of
+            # trial wrapper started, we want to avoid
+            # manager waiting for its completion forever.
+            self._manager.register_trial_exit()
+            Pub(self._manager.common_topic).put(EmptyCommand())
+
+
 class OptimizationManager:
     def __init__(self, n_trials: int) -> None:
         self._n_trials = n_trials
         self._finished_trials = 0
+        self.heartbeat = OptimizationHeartbeat(self)
         self.common_topic = str(uuid.uuid4())
         self._private_topics: Dict[int, str] = {}
 
@@ -446,7 +463,9 @@ class Study:
         # fire and forget, sice we want to avoid orphaned trials if main process goes down.
         # TODO(xadrianzetx) We could probably use those futures as a part of heartbeat
         # mechanism in optimization process manager.
-        _ = self.client.map(_objective_wrapper, trials)
+        futures = self.client.map(_objective_wrapper, trials)
+        for future in futures:
+            future.add_done_callback(manager.heartbeat.attach)
 
         for command in commands:
             command.execute(self, manager)
