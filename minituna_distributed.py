@@ -223,7 +223,7 @@ class OptimizationManager:
 
 class BaseCommand(abc.ABC):
     @abc.abstractmethod
-    def execute(self, study: "Study", manager: OptimizationManager):
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
         ...
 
 
