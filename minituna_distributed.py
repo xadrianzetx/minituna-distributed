@@ -210,6 +210,11 @@ class BaseCommand(abc.ABC):
         ...
 
 
+class EmptyCommand(BaseCommand):
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
+        pass
+
+
 class SuggestCommand(BaseCommand):
     def __init__(self, trial_id: int, name: str, distribution: BaseDistribution) -> None:
         self.trial_id = trial_id
