@@ -2,6 +2,8 @@
 
 A distributed optimization POC for [Optuna](https://github.com/optuna/optuna), based on fork of awesome [Minituna](https://github.com/CyberAgentAILab/minituna) toy hyperparameter optimization framework.
 
+![tty](https://user-images.githubusercontent.com/37713008/184008594-4a8ac69c-80f7-414a-871a-7a43024af61e.gif)
+
 ## Core idea
 
 Much like in [`minituna-multiprocess`](https://github.com/xadrianzetx/minituna-multiprocess), the idea is to distribute execution of trials across workers (in this case different physical machines) as tasks and keep study and its resources (storage, sampler etc.) local in client process (see rationale behind that in `minituna-multiprocess` README file). Task scheduler, client, cluster deployment and coordination primitives (pubsub) are provided by [dask](https://docs.dask.org/en/stable/).
