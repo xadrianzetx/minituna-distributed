@@ -189,7 +189,7 @@ class OptimizationHeartbeat:
         # A hook for periodic checkups would be nice as well.
         self._manager = manager
 
-    def attach(self, future: Future) -> None:
+    def ensure_safe_exit(self, future: Future) -> None:
         if future.status in ["error", "cancelled"]:
             # In case future failed before execution of
             # trial wrapper started, we want to avoid
@@ -465,7 +465,7 @@ class Study:
         # mechanism in optimization process manager.
         futures = self.client.map(_objective_wrapper, trials)
         for future in futures:
-            future.add_done_callback(manager.heartbeat.attach)
+            future.add_done_callback(manager.heartbeat.ensure_safe_exit)
 
         for command in commands:
             command.execute(self, manager)
