@@ -195,7 +195,7 @@ class OptimizationHeartbeat:
             # trial wrapper started, we want to avoid
             # manager waiting for its completion forever.
             self._manager.register_trial_exit()
-            Pub(self._manager.common_topic).put(EmptyCommand())
+            Pub(self._manager.master_topic).put(EmptyCommand())
 
 
 class OptimizationManager:
@@ -203,16 +203,8 @@ class OptimizationManager:
         self._n_trials = n_trials
         self._finished_trials = 0
         self.heartbeat = OptimizationHeartbeat(self)
-        self.common_topic = str(uuid.uuid4())
-        self._private_topics: Dict[int, str] = {}
-
-    def assign_private_topic(self, trial_id: int) -> str:
-        topic = str(uuid.uuid4())
-        self._private_topics[trial_id] = topic
-        return topic
-
-    def get_private_topic(self, trial_id: int) -> str:
-        return self._private_topics[trial_id]
+        self.master_topic = str(uuid.uuid4())
+        self.workers_topic = str(uuid.uuid4())
 
     def register_trial_exit(self) -> None:
         self._finished_trials += 1
@@ -229,7 +221,16 @@ class BaseCommand(abc.ABC):
 
 class EmptyCommand(BaseCommand):
     def execute(self, study: "Study", manager: OptimizationManager) -> None:
-        pass
+        ...
+
+
+class DataCommand(BaseCommand):
+    def __init__(self, trial_id: int, data: Any) -> None:
+        self.trial_id = trial_id
+        self.data = data
+
+    def execute(self, study: "Study", manager: OptimizationManager) -> None:
+        return super().execute(study, manager)
 
 
 class SuggestCommand(BaseCommand):
@@ -253,8 +254,8 @@ class SuggestCommand(BaseCommand):
         else:
             raise ValueError("Unknown distribution")
 
-        publisher = Pub(manager.get_private_topic(self.trial_id))
-        publisher.put(param_value)
+        publisher = Pub(manager.workers_topic)
+        publisher.put(DataCommand(self.trial_id, param_value))
 
 
 class ReportCommand(BaseCommand):
@@ -274,8 +275,8 @@ class ShouldPruneCommand(BaseCommand):
 
     def execute(self, study: "Study", manager: OptimizationManager) -> None:
         trial = Trial(study, self.trial_id)
-        publisher = Pub(manager.get_private_topic(self.trial_id))
-        publisher.put(trial.should_prune())
+        publisher = Pub(manager.workers_topic)
+        publisher.put(DataCommand(self.trial_id, trial.should_prune()))
 
 
 class TrialFinishedCommand(BaseCommand):
@@ -344,8 +345,9 @@ class DistributedTrial(Trial):
     def _suggest(self, name: str, distribution: BaseDistribution) -> Any:
         cmd = SuggestCommand(self.trial_id, name, distribution)
         self.publisher.put(cmd)
-        param_value = self.subscriber.get()
-        return param_value
+        for message in self.subscriber:
+            if message.trial_id == self.trial_id:
+                return message.data
 
     def suggest_float(
         self,
@@ -370,8 +372,9 @@ class DistributedTrial(Trial):
     def should_prune(self) -> bool:
         cmd = ShouldPruneCommand(self.trial_id)
         self.publisher.put(cmd)
-        should_prune = self.subscriber.get()
-        return should_prune
+        for message in self.subscriber:
+            if message.trial_id == self.trial_id:
+                return message.data
 
 
 class Sampler:
@@ -452,11 +455,10 @@ class Study:
                 trial.publisher.put(cmd)
 
         manager = OptimizationManager(n_trials)
-        commands = Sub(manager.common_topic)
+        commands = Sub(manager.master_topic)
         trial_ids = [self.storage.create_new_trial() for _ in range(n_trials)]
         trials = [
-            DistributedTrial(id, manager.common_topic, manager.assign_private_topic(id))
-            for id in trial_ids
+            DistributedTrial(id, manager.master_topic, manager.workers_topic) for id in trial_ids
         ]
         # We need to hold reference to futures, even though we technically don't need them,
         # otherwise task associated with them will be killed by scheduler. We can't just
