@@ -1,6 +1,7 @@
 import abc
 import copy
 import math
+import pickle
 import random
 import socket
 from typing import Any
@@ -15,8 +16,7 @@ import uuid
 
 from dask.distributed import Client
 from dask.distributed import Future
-from dask.distributed import Pub
-from dask.distributed import Sub
+from dask.distributed import Queue
 import numpy as np
 
 
@@ -183,6 +183,17 @@ class Trial:
         return self.study.pruner.prune(self.study, trial)
 
 
+class PickledQueue:
+    def __init__(self, name: str) -> None:
+        self.q = Queue(name)
+
+    def put(self, value: Any, timeout: Optional[Any] = None) -> None:
+        self.q.put(pickle.dumps(value), timeout)
+
+    def get(self, timeout: Optional[Any] = None) -> Any:
+        return pickle.loads(self.q.get(timeout))
+
+
 class OptimizationHeartbeat:
     def __init__(self, manager: "OptimizationManager") -> None:
 
@@ -195,7 +206,7 @@ class OptimizationHeartbeat:
             # trial wrapper started, we want to avoid
             # manager waiting for its completion forever.
             self._manager.register_trial_exit()
-            Pub(self._manager.common_topic).put(EmptyCommand())
+            PickledQueue(self._manager.common_topic).put(EmptyCommand())
 
 
 class OptimizationManager:
@@ -253,7 +264,7 @@ class SuggestCommand(BaseCommand):
         else:
             raise ValueError("Unknown distribution")
 
-        publisher = Pub(manager.get_private_topic(self.trial_id))
+        publisher = PickledQueue(manager.get_private_topic(self.trial_id))
         publisher.put(param_value)
 
 
@@ -274,7 +285,7 @@ class ShouldPruneCommand(BaseCommand):
 
     def execute(self, study: "Study", manager: OptimizationManager) -> None:
         trial = Trial(study, self.trial_id)
-        publisher = Pub(manager.get_private_topic(self.trial_id))
+        publisher = PickledQueue(manager.get_private_topic(self.trial_id))
         publisher.put(trial.should_prune())
 
 
@@ -323,22 +334,22 @@ class DistributedTrial(Trial):
         self.trial_id = trial_id
         self.common_topic = common_topic
         self.private_topic = private_topic
-        self._publisher: Optional[Pub] = None
-        self._subscriber: Optional[Sub] = None
+        self._publisher: Optional[PickledQueue] = None
+        self._subscriber: Optional[PickledQueue] = None
 
     @property
-    def publisher(self) -> Pub:
+    def publisher(self) -> Queue:
         # We need to hold reference to publisher/subscriber
         # for the entire lifetime of a task, otherwise topic
         # could get garbage collected.
         if self._publisher is None:
-            self._publisher = Pub(self.common_topic)
+            self._publisher = PickledQueue(self.common_topic)
         return self._publisher
 
     @property
-    def subscriber(self) -> Sub:
+    def subscriber(self) -> PickledQueue:
         if self._subscriber is None:
-            self._subscriber = Sub(self.private_topic)
+            self._subscriber = PickledQueue(self.private_topic)
         return self._subscriber
 
     def _suggest(self, name: str, distribution: BaseDistribution) -> Any:
@@ -452,7 +463,7 @@ class Study:
                 trial.publisher.put(cmd)
 
         manager = OptimizationManager(n_trials)
-        commands = Sub(manager.common_topic)
+        commands = PickledQueue(manager.common_topic)
         trial_ids = [self.storage.create_new_trial() for _ in range(n_trials)]
         trials = [
             DistributedTrial(id, manager.common_topic, manager.assign_private_topic(id))
@@ -467,7 +478,8 @@ class Study:
         for future in futures:
             future.add_done_callback(manager.heartbeat.ensure_safe_exit)
 
-        for command in commands:
+        while True:
+            command = commands.get()
             command.execute(self, manager)
             if manager.should_end_optimization():
                 break
