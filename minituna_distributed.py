@@ -229,7 +229,7 @@ class BaseCommand(abc.ABC):
 
 class EmptyCommand(BaseCommand):
     def execute(self, study: "Study", manager: OptimizationManager) -> None:
-        pass
+        ...
 
 
 class SuggestCommand(BaseCommand):
