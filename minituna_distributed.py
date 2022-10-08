@@ -19,6 +19,7 @@ import uuid
 
 from dask.distributed import Client
 from dask.distributed import Future
+from dask.distributed import LocalCluster
 from dask.distributed import Queue
 from dask.distributed import Variable
 import numpy as np
@@ -466,12 +467,15 @@ class Study:
             DistributedTrial(id, manager.common_topic, manager.assign_private_topic(id))
             for id in trial_ids
         ]
+
+        func = _distributable(
+            objective, with_supervisor=not isinstance(self.client.cluster, LocalCluster)
+        )
+
         # We need to hold reference to futures, even though we technically don't need them,
         # otherwise task associated with them will be killed by scheduler. We can't just
         # fire and forget, sice we want to avoid orphaned trials if main process goes down.
-        # TODO(xadrianzetx) We could probably use those futures as a part of heartbeat
-        # mechanism in optimization process manager.
-        futures = self.client.map(distributable(objective), trials)
+        futures = self.client.map(func, trials)
         for future in futures:
             future.add_done_callback(manager.heartbeat.ensure_safe_exit)
 
