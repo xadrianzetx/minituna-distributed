@@ -446,22 +446,6 @@ class Study:
         self.client = client
 
     def optimize(self, objective: Callable[[DistributedTrial], float], n_trials: int) -> None:
-        def _objective_wrapper(trial: DistributedTrial) -> None:
-            cmd: BaseCommand
-            try:
-                value_or_values = objective(trial)
-                host = socket.gethostname()
-                cmd = TrialFinishedCommand(trial.trial_id, value_or_values, host)
-                trial.publisher.put(cmd)
-
-            except TrialPruned:
-                cmd = TrialPrunedCommand(trial.trial_id)
-                trial.publisher.put(cmd)
-
-            except Exception as e:
-                cmd = TrialFailedCommand(trial.trial_id, e)
-                trial.publisher.put(cmd)
-
         manager = OptimizationManager(n_trials)
         commands = PickledQueue(manager.common_topic)
         trial_ids = [self.storage.create_new_trial() for _ in range(n_trials)]
@@ -474,7 +458,7 @@ class Study:
         # fire and forget, sice we want to avoid orphaned trials if main process goes down.
         # TODO(xadrianzetx) We could probably use those futures as a part of heartbeat
         # mechanism in optimization process manager.
-        futures = self.client.map(_objective_wrapper, trials)
+        futures = self.client.map(distributable(objective), trials)
         for future in futures:
             future.add_done_callback(manager.heartbeat.ensure_safe_exit)
 
@@ -487,6 +471,26 @@ class Study:
     @property
     def best_trial(self) -> Optional[FrozenTrial]:
         return self.storage.get_best_trial()
+
+
+def distributable(func: Callable[[DistributedTrial], float]) -> Callable[[DistributedTrial], None]:
+    def _objective_wrapper(trial: DistributedTrial) -> None:
+        cmd: BaseCommand
+        try:
+            value_or_values = func(trial)
+            host = socket.gethostname()
+            cmd = TrialFinishedCommand(trial.trial_id, value_or_values, host)
+            trial.publisher.put(cmd)
+
+        except TrialPruned:
+            cmd = TrialPrunedCommand(trial.trial_id)
+            trial.publisher.put(cmd)
+
+        except Exception as e:
+            cmd = TrialFailedCommand(trial.trial_id, e)
+            trial.publisher.put(cmd)
+
+    return _objective_wrapper
 
 
 def create_study(
