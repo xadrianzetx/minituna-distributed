@@ -475,11 +475,32 @@ class Study:
         for future in futures:
             future.add_done_callback(manager.heartbeat.ensure_safe_exit)
 
+        try:
+            self._event_loop(manager, commands)
+
+        except KeyboardInterrupt:
+            # Local cluster is destroyed on process exit anyway so we don't need to interrupt.
+            if not isinstance(self.client.cluster, LocalCluster):
+                self._handle_interrupt(manager, futures)
+            raise
+
+    def _event_loop(self, manager: OptimizationManager, commands: PickledQueue) -> None:
         while True:
             command = commands.get()
             command.execute(self, manager)
             if manager.should_end_optimization():
                 break
+
+    def _handle_interrupt(self, manager: OptimizationManager, futures: Future) -> None:
+        for future in futures:
+            future.cancel()
+
+        # FIXME: Dask variable needs to stay in scope until all
+        # workers read its final state, otherwise supervisor attempts to
+        # read a flag that no longer exists. Obviously, doing it by sleeping
+        # and hoping all workers had a chance to exit is a nasty nasty hack. :^)
+        manager.stop_optimization()
+        time.sleep(1.0)
 
     @property
     def best_trial(self) -> Optional[FrozenTrial]:
