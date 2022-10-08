@@ -4,6 +4,8 @@ import math
 import pickle
 import random
 import socket
+import threading
+import time
 from typing import Any
 from typing import Callable
 from typing import cast
@@ -26,6 +28,10 @@ CategoricalChoiceType = Union[None, bool, int, float, str]
 
 
 class TrialPruned(Exception):
+    ...
+
+
+class WorkerInterrupt(threading.ThreadError):
     ...
 
 
