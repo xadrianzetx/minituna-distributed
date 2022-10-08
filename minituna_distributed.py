@@ -17,6 +17,7 @@ import uuid
 from dask.distributed import Client
 from dask.distributed import Future
 from dask.distributed import Queue
+from dask.distributed import Variable
 import numpy as np
 
 
@@ -216,6 +217,8 @@ class OptimizationManager:
         self.heartbeat = OptimizationHeartbeat(self)
         self.common_topic = str(uuid.uuid4())
         self._private_topics: Dict[int, str] = {}
+        self.stop_condition = Variable("stop-condition")
+        self.stop_condition.set(False)
 
     def assign_private_topic(self, trial_id: int) -> str:
         topic = str(uuid.uuid4())
@@ -230,6 +233,9 @@ class OptimizationManager:
 
     def should_end_optimization(self) -> bool:
         return self._finished_trials == self._n_trials
+
+    def stop_optimization(self) -> None:
+        self.stop_condition.set(True)
 
 
 class BaseCommand(abc.ABC):
