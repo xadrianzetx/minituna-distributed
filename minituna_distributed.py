@@ -1,5 +1,6 @@
 import abc
 import copy
+import ctypes
 import math
 import pickle
 import random
@@ -485,9 +486,16 @@ class Study:
         return self.storage.get_best_trial()
 
 
-def distributable(func: Callable[[DistributedTrial], float]) -> Callable[[DistributedTrial], None]:
+def _distributable(
+    func: Callable[[DistributedTrial], float], with_supervisor: bool
+) -> Callable[[DistributedTrial], None]:
     def _objective_wrapper(trial: DistributedTrial) -> None:
         cmd: BaseCommand
+        stop_flag = threading.Event()
+        if with_supervisor:
+            tid = threading.get_ident()
+            threading.Thread(target=_supervisor, args=(tid, stop_flag), daemon=True).start()
+
         try:
             value_or_values = func(trial)
             host = socket.gethostname()
@@ -498,11 +506,32 @@ def distributable(func: Callable[[DistributedTrial], float]) -> Callable[[Distri
             cmd = TrialPrunedCommand(trial.trial_id)
             trial.publisher.put(cmd)
 
+        except WorkerInterrupt:
+            print(f"Trial {trial.trial_id} interrupted by supervisor.")
+
         except Exception as e:
             cmd = TrialFailedCommand(trial.trial_id, e)
             trial.publisher.put(cmd)
 
+        finally:
+            stop_flag.set()
+
     return _objective_wrapper
+
+
+def _supervisor(thread_id: int, parent_exit: threading.Event) -> None:
+    stop_condition = Variable("stop-condition")
+    while True:
+        time.sleep(0.1)
+        if parent_exit.is_set():
+            break
+
+        if stop_condition.get():
+            # https://gist.github.com/liuw/2407154
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_long(thread_id), ctypes.py_object(WorkerInterrupt)
+            )
+            break
 
 
 def create_study(
