@@ -33,7 +33,7 @@ class TrialPruned(Exception):
     ...
 
 
-class WorkerInterrupt(threading.ThreadError):
+class WorkerInterrupted(threading.ThreadError):
     ...
 
 
@@ -531,7 +531,7 @@ def _distributable(
             cmd = TrialPrunedCommand(trial.trial_id)
             trial.publisher.put(cmd)
 
-        except WorkerInterrupt:
+        except WorkerInterrupted:
             print(f"Trial {trial.trial_id} interrupted by supervisor.")
 
         except Exception as e:
@@ -554,7 +554,7 @@ def _supervisor(thread_id: int, parent_exit: threading.Event) -> None:
         if stop_condition.get():
             # https://gist.github.com/liuw/2407154
             ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                ctypes.c_long(thread_id), ctypes.py_object(WorkerInterrupt)
+                ctypes.c_long(thread_id), ctypes.py_object(WorkerInterrupted)
             )
             break
 
