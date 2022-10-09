@@ -495,7 +495,7 @@ class Study:
             if manager.should_end_optimization():
                 break
 
-    def _handle_interrupt(self, manager: OptimizationManager, futures: Future) -> None:
+    def _handle_interrupt(self, manager: OptimizationManager, futures: List[Future]) -> None:
         for future in futures:
             future.cancel()
 
