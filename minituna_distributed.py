@@ -33,7 +33,7 @@ class TrialPruned(Exception):
     ...
 
 
-class WorkerInterrupted(threading.ThreadError):
+class WorkerInterrupted(Exception):
     ...
 
 
