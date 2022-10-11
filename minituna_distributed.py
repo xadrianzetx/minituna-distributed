@@ -6,6 +6,7 @@ import pickle
 import random
 import socket
 import threading
+from threading import Thread
 import time
 from typing import Any
 from typing import Callable
@@ -519,7 +520,8 @@ def _distributable(
         stop_flag = threading.Event()
         if with_supervisor:
             tid = threading.get_ident()
-            threading.Thread(target=_supervisor, args=(tid, stop_flag), daemon=True).start()
+            t = Thread(target=_supervisor, args=(tid, stop_flag), daemon=True)
+            t.start()
 
         try:
             value_or_values = func(trial)
@@ -540,6 +542,8 @@ def _distributable(
 
         finally:
             stop_flag.set()
+            if with_supervisor:
+                t.join()
 
     return _objective_wrapper
 
