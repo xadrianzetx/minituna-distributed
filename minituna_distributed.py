@@ -233,6 +233,7 @@ class OptimizationManager:
         self.heartbeat = OptimizationHeartbeat(self)
         self.common_topic = str(uuid.uuid4())
         self._private_topics: Dict[int, str] = {}
+        self._task_states: List[Variable] = []
         self.stop_condition = Variable("stop-condition")
         self.stop_condition.set(False)
 
@@ -240,6 +241,13 @@ class OptimizationManager:
         topic = str(uuid.uuid4())
         self._private_topics[trial_id] = topic
         return topic
+
+    def assign_state_flag(self) -> str:
+        state_flag_name = str(uuid.uuid4())
+        task_state = Variable(state_flag_name)
+        task_state.set(TaskState.WAITING)
+        self._task_states.append(task_state)
+        return state_flag_name
 
     def get_private_topic(self, trial_id: int) -> str:
         return self._private_topics[trial_id]
@@ -352,10 +360,13 @@ class TrialPrunedCommand(BaseCommand):
 
 
 class DistributedTrial(Trial):
-    def __init__(self, trial_id: int, common_topic: str, private_topic: str) -> None:
+    def __init__(
+        self, trial_id: int, common_topic: str, private_topic: str, state_flag_name: str
+    ) -> None:
         self.trial_id = trial_id
         self.common_topic = common_topic
         self.private_topic = private_topic
+        self.state_flag_name = state_flag_name
         self._publisher: Optional[PickledQueue] = None
         self._subscriber: Optional[PickledQueue] = None
 
@@ -472,7 +483,12 @@ class Study:
         commands = PickledQueue(manager.common_topic)
         trial_ids = [self.storage.create_new_trial() for _ in range(n_trials)]
         trials = [
-            DistributedTrial(id, manager.common_topic, manager.assign_private_topic(id))
+            DistributedTrial(
+                id,
+                common_topic=manager.common_topic,
+                private_topic=manager.assign_private_topic(id),
+                state_flag_name=manager.assign_state_flag(),
+            )
             for id in trial_ids
         ]
 
