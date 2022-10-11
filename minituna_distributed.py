@@ -539,13 +539,13 @@ def _distributable(
     func: Callable[[DistributedTrial], float], with_supervisor: bool
 ) -> Callable[[DistributedTrial], None]:
     def _objective_wrapper(trial: DistributedTrial) -> None:
-        cmd: BaseCommand
-        stop_flag = threading.Event()
+        state = Variable(trial.state_flag_name)
+        state.set(TaskState.RUNNING)
         if with_supervisor:
-            tid = threading.get_ident()
-            t = Thread(target=_supervisor, args=(tid, stop_flag), daemon=True)
-            t.start()
+            args = (threading.get_ident(), trial.state_flag_name)
+            Thread(target=_supervisor, args=args, daemon=True).start()
 
+        cmd: BaseCommand
         try:
             value_or_values = func(trial)
             host = socket.gethostname()
@@ -564,18 +564,17 @@ def _distributable(
             trial.publisher.put(cmd)
 
         finally:
-            stop_flag.set()
-            if with_supervisor:
-                t.join()
+            state.set(TaskState.FINISHED)
 
     return _objective_wrapper
 
 
-def _supervisor(thread_id: int, parent_exit: threading.Event) -> None:
+def _supervisor(thread_id: int, state_flag_name: str) -> None:
     stop_condition = Variable("stop-condition")
+    state = Variable(state_flag_name)
     while True:
         time.sleep(0.1)
-        if parent_exit.is_set():
+        if state.get() == TaskState.FINISHED:
             break
 
         if stop_condition.get():
