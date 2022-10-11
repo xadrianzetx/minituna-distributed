@@ -1,6 +1,7 @@
 import abc
 import copy
 import ctypes
+from enum import IntEnum
 import math
 import pickle
 import random
@@ -28,6 +29,12 @@ import numpy as np
 
 TrialStateType = Literal["running", "completed", "pruned", "failed"]
 CategoricalChoiceType = Union[None, bool, int, float, str]
+
+
+class TaskState(IntEnum):
+    WAITING = 0
+    RUNNING = 1
+    FINISHED = 2
 
 
 class TrialPruned(Exception):
