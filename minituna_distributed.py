@@ -260,6 +260,11 @@ class OptimizationManager:
 
     def stop_optimization(self) -> None:
         self.stop_condition.set(True)
+        stop_called_at = time.time()
+        while not all(state.get() != TaskState.RUNNING for state in self._task_states):
+            time.sleep(0.5)
+            if time.time() - stop_called_at > 5.0:
+                raise TimeoutError("Timed out while waiting for all tasks to finish.")
 
 
 class BaseCommand(abc.ABC):
@@ -523,12 +528,9 @@ class Study:
         for future in futures:
             future.cancel()
 
-        # FIXME: Dask variable needs to stay in scope until all
-        # workers read its final state, otherwise supervisor attempts to
-        # read a flag that no longer exists. Obviously, doing it by sleeping
-        # and hoping all workers had a chance to exit is a nasty nasty hack. :^)
+        print("Waiting for all tasks to stop...", end="", flush=True)
         manager.stop_optimization()
-        time.sleep(1.0)
+        print("done.")
 
     @property
     def best_trial(self) -> Optional[FrozenTrial]:
