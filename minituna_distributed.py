@@ -208,6 +208,11 @@ class PickledQueue:
         self.q.put(pickle.dumps(value), timeout)
 
     def get(self, timeout: Optional[Any] = None) -> Any:
+        # NOTE: An attempt to read the queue when interrupt signal is sent
+        # will result in softlock until either queue or interrupt sender times out.
+        # Task thread has no chance to read exception state when blocked in q.get, and
+        # q.get will never return (without timeout), since main thread already
+        # abandoned event loop to handle the exception.
         return pickle.loads(self.q.get(timeout))
 
 
@@ -393,7 +398,7 @@ class DistributedTrial(Trial):
     def _suggest(self, name: str, distribution: BaseDistribution) -> Any:
         cmd = SuggestCommand(self.trial_id, name, distribution)
         self.publisher.put(cmd)
-        param_value = self.subscriber.get()
+        param_value = self.subscriber.get(timeout=1.0)
         return param_value
 
     def suggest_float(
@@ -419,7 +424,7 @@ class DistributedTrial(Trial):
     def should_prune(self) -> bool:
         cmd = ShouldPruneCommand(self.trial_id)
         self.publisher.put(cmd)
-        should_prune = self.subscriber.get()
+        should_prune = self.subscriber.get(timeout=1.0)
         return should_prune
 
 
