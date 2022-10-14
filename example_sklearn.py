@@ -1,5 +1,6 @@
 # type: ignore
 
+from dask.distributed import Client
 import sklearn.datasets
 import sklearn.ensemble
 import sklearn.model_selection
@@ -28,8 +29,9 @@ def objective(trial):
 
 
 if __name__ == "__main__":
-    study = minituna.create_study()
-    study.optimize(objective, 10)
+    client = Client("localhost:8786")
+    study = minituna.create_study(client=client)
+    study.optimize(objective, 100)
 
     best_trial = study.best_trial
     print(f"Best trial: value={best_trial.value} params={best_trial.params}")
