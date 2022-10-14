@@ -266,7 +266,7 @@ class OptimizationManager:
     def stop_optimization(self) -> None:
         self.stop_condition.set(True)
         stop_called_at = time.time()
-        while not all(state.get() != TaskState.RUNNING for state in self._task_states):
+        while any(state.get() == TaskState.RUNNING for state in self._task_states):
             time.sleep(0.5)
             if time.time() - stop_called_at > 5.0:
                 raise TimeoutError("Timed out while waiting for all tasks to finish.")
