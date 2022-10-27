@@ -231,28 +231,40 @@ class OptimizationHeartbeat:
             PickledQueue(self._manager.common_topic).put(EmptyCommand())
 
 
+class StateSynchronizer:
+    def __init__(self) -> None:
+        self._optimziation_enabled = Variable("optimization-enabled")
+        self._optimziation_enabled.set(True)
+        self._task_states: List[Variable] = []
+
+    def set_initial_state(self) -> str:
+        task_state = Variable()
+        task_state.set(TaskState.WAITING)
+        self._task_states.append(task_state)
+        return task_state.name
+
+    def emit_stop_and_wait(self, patience: int) -> None:
+        self._optimziation_enabled.set(False)
+        disabled_at = time.time()
+        while any(task_state.get() == TaskState.RUNNING for task_state in self._task_states):
+            if time.time() - disabled_at > patience:
+                raise TimeoutError("Timed out while waiting for all tasks to finish.")
+            time.sleep(0.1)
+
+
 class OptimizationManager:
     def __init__(self, n_trials: int) -> None:
         self._n_trials = n_trials
         self._finished_trials = 0
         self.heartbeat = OptimizationHeartbeat(self)
+        self.synchronizer = StateSynchronizer()
         self.common_topic = str(uuid.uuid4())
         self._private_topics: Dict[int, str] = {}
-        self._task_states: List[Variable] = []
-        self.stop_condition = Variable("stop-condition")
-        self.stop_condition.set(False)
 
     def assign_private_topic(self, trial_id: int) -> str:
         topic = str(uuid.uuid4())
         self._private_topics[trial_id] = topic
         return topic
-
-    def assign_state_flag(self) -> str:
-        state_flag_name = str(uuid.uuid4())
-        task_state = Variable(state_flag_name)
-        task_state.set(TaskState.WAITING)
-        self._task_states.append(task_state)
-        return state_flag_name
 
     def get_private_topic(self, trial_id: int) -> str:
         return self._private_topics[trial_id]
@@ -264,12 +276,7 @@ class OptimizationManager:
         return self._finished_trials == self._n_trials
 
     def stop_optimization(self) -> None:
-        self.stop_condition.set(True)
-        stop_called_at = time.time()
-        while any(state.get() == TaskState.RUNNING for state in self._task_states):
-            time.sleep(0.5)
-            if time.time() - stop_called_at > 5.0:
-                raise TimeoutError("Timed out while waiting for all tasks to finish.")
+        self.synchronizer.emit_stop_and_wait(10)
 
 
 class BaseCommand(abc.ABC):
@@ -497,7 +504,7 @@ class Study:
                 id,
                 common_topic=manager.common_topic,
                 private_topic=manager.assign_private_topic(id),
-                state_flag_name=manager.assign_state_flag(),
+                state_flag_name=manager.synchronizer.set_initial_state(),
             )
             for id in trial_ids
         ]
@@ -577,14 +584,14 @@ def _distributable(
 
 
 def _supervisor(thread_id: int, state_flag_name: str) -> None:
-    stop_condition = Variable("stop-condition")
-    state = Variable(state_flag_name)
+    optimization_enabled = Variable("optimization-enabled")
+    task_state = Variable(state_flag_name)
     while True:
         time.sleep(0.1)
-        if state.get() == TaskState.FINISHED:
+        if task_state.get() == TaskState.FINISHED:
             break
 
-        if stop_condition.get():
+        if not optimization_enabled.get():
             # https://gist.github.com/liuw/2407154
             ctypes.pythonapi.PyThreadState_SetAsyncExc(
                 ctypes.c_long(thread_id), ctypes.py_object(WorkerInterrupted)
