@@ -1,4 +1,5 @@
 import abc
+import asyncio
 import copy
 import ctypes
 from enum import IntEnum
@@ -201,19 +202,24 @@ class Trial:
 
 
 class PickledQueue:
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, retries: Optional[int] = None) -> None:
         self.q = Queue(name)
+        self.retries = retries
 
     def put(self, value: Any, timeout: Optional[Any] = None) -> None:
         self.q.put(pickle.dumps(value), timeout)
 
-    def get(self, timeout: Optional[Any] = None) -> Any:
-        # NOTE: An attempt to read the queue when interrupt signal is sent
-        # will result in softlock until either queue or interrupt sender times out.
-        # Task thread has no chance to read exception state when blocked in q.get, and
-        # q.get will never return (without timeout), since main thread already
-        # abandoned event loop to handle the exception.
-        return pickle.loads(self.q.get(timeout))
+    def get(self) -> Any:
+        attempt = 0
+        while True:
+            try:
+                timeout = 2**attempt if self.retries is not None else None
+                return pickle.loads(self.q.get(timeout))
+            except asyncio.TimeoutError:
+                attempt += 1
+                if self.retries is not None and attempt == self.retries:
+                    raise
+                print(f"Attempt {attempt} timed out, re-trying...")
 
 
 class OptimizationHeartbeat:
@@ -399,13 +405,13 @@ class DistributedTrial(Trial):
     @property
     def subscriber(self) -> PickledQueue:
         if self._subscriber is None:
-            self._subscriber = PickledQueue(self.private_topic)
+            self._subscriber = PickledQueue(self.private_topic, retries=5)
         return self._subscriber
 
     def _suggest(self, name: str, distribution: BaseDistribution) -> Any:
         cmd = SuggestCommand(self.trial_id, name, distribution)
         self.publisher.put(cmd)
-        param_value = self.subscriber.get(timeout=1.0)
+        param_value = self.subscriber.get()
         return param_value
 
     def suggest_float(
@@ -431,7 +437,7 @@ class DistributedTrial(Trial):
     def should_prune(self) -> bool:
         cmd = ShouldPruneCommand(self.trial_id)
         self.publisher.put(cmd)
-        should_prune = self.subscriber.get(timeout=1.0)
+        should_prune = self.subscriber.get()
         return should_prune
 
 
